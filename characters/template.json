@@ -1,0 +1,13 @@
+{
+    "id": "character_id",
+    "name": "Character Name",
+    "version": "1.0",
+    "gender": "M/F/Other",
+    "category": "Fantasy/Real/etc.",
+    "tags": [ "Tag1", "Tag2", "Tag3" ],
+    "description": "One-line description ",
+    "greeting_context": "Character backstory from the 'Story/Lore' column",
+    "personality": "Character's tone, style, and distinguishing quirks",
+    "greeting": "How the character uniquely said when greeting new users",
+    "response_style": "How the character typically speaks, asks questions, and concludes conversations"
+}
