@@ -2,9 +2,9 @@ import os
 import sys
 from typing import Optional
 from colorama import init, Fore, Style, Back
-from .character_manager import CharacterManager
-from .ai_handler import AIHandler
-from .conversation import Conversation
+from character_manager import CharacterManager
+from ai_handler import AIHandler
+from conversation import Conversation
 
 init(autoreset=True)  # Initialize colorama
 
