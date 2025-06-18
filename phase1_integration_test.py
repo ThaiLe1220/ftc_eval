@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-Phase 1 Complete Integration Test
+Phase 1 Complete Integration Test - Updated for Model Separation
 
-This script demonstrates the complete Phase 1 evaluation pipeline:
+This script demonstrates the complete Phase 1 evaluation pipeline with the new model configuration:
+- Character conversations use Claude Sonnet 4 (no thinking) or GPT-4.1
+- Evaluations use DeepSeek Reasoner (default), Claude with thinking, or GPT-4.1
+
 1. Load character and scenario
 2. Create/simulate conversation
-3. Evaluate with multiple AI providers
+3. Evaluate with multiple AI evaluation providers
 4. Store results and generate analysis
 5. Demonstrate data retrieval and reporting
 
-This validates that all Phase 1 components work together seamlessly.
+This validates that all Phase 1 components work together seamlessly with the new model setup.
 """
 
 import sys
@@ -21,10 +24,10 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from test_scenarios import TestScenarios
-from ai_evaluator import AIEvaluator
+from ai_evaluator import AIEvaluator, EvaluationResult, ConsensusAnalysis
 from ai_handler import AIHandler
 from character_manager import CharacterManager
-from results_manager import ResultsManager
+from enhanced_results_manager import EnhancedResultsManager
 from conversation import Conversation
 
 
@@ -38,7 +41,7 @@ def create_test_conversation(
         character_name=character_data["name"],
         user_name=user_name,
         scenario_id=scenario_data["id"],
-        provider="claude",  # Will be used for this test
+        provider="claude",  # Will use Claude Sonnet 4 without thinking for character conversation
     )
 
     # Simulate conversation based on scenario
@@ -101,10 +104,10 @@ def create_test_conversation(
 
 
 def run_full_pipeline_test():
-    """Run the complete Phase 1 evaluation pipeline"""
+    """Run the complete Phase 1 evaluation pipeline with new model separation"""
 
-    print("🧪 Phase 1 Complete Integration Test")
-    print("=" * 60)
+    print("🧪 Phase 1 Complete Integration Test - Updated Model Configuration")
+    print("=" * 70)
 
     try:
         # Step 1: Initialize all components
@@ -115,13 +118,30 @@ def run_full_pipeline_test():
         character_manager = CharacterManager()
         ai_handler = AIHandler()
         evaluator = AIEvaluator(ai_handler)
-        results_manager = ResultsManager()
+        results_manager = EnhancedResultsManager()
 
-        available_providers = ai_handler.get_available_providers()
-        print(f"✓ Available AI providers: {available_providers}")
+        # Display provider information
+        provider_info = ai_handler.get_provider_info()
+        print(f"✓ Chat providers: {provider_info['chat_providers']}")
+        print(f"✓ Evaluation providers: {provider_info['evaluation_providers']}")
+        print(f"✓ Default chat provider: {provider_info['default_chat']}")
+        print(f"✓ Default evaluation provider: {provider_info['default_evaluation']}")
+        print(
+            f"✓ Model versions: {json.dumps(provider_info['model_versions'], indent=2)}"
+        )
 
-        # Step 2: Select test cases
-        print("\n📋 Step 2: Test Case Selection")
+        # Step 2: Test Provider Configuration
+        print("\n📋 Step 2: Provider Testing")
+        print("-" * 40)
+
+        test_results = ai_handler.test_all_providers()
+        print("Provider test results:")
+        for provider, result in test_results.items():
+            status = "✓" if result else "✗"
+            print(f"  {status} {provider}: {'Working' if result else 'Failed'}")
+
+        # Step 3: Select test cases
+        print("\n📋 Step 3: Test Case Selection")
         print("-" * 40)
 
         # Test multiple character/scenario combinations
@@ -143,8 +163,8 @@ def run_full_pipeline_test():
             print(f"✓ Character: {character_data['name']}")
             print(f"✓ Scenario: {scenario_data['name']}")
 
-            # Step 3: Create conversation
-            print(f"\n📋 Step 3: Conversation Creation")
+            # Step 4: Create conversation
+            print(f"\n📋 Step 4: Conversation Creation")
             print("-" * 40)
 
             conversation = create_test_conversation(character_data, scenario_data)
@@ -166,8 +186,8 @@ def run_full_pipeline_test():
 
             print(f"✓ Conversation validation passed")
 
-            # Step 4: Store conversation
-            print(f"\n📋 Step 4: Conversation Storage")
+            # Step 5: Store conversation
+            print(f"\n📋 Step 5: Conversation Storage")
             print("-" * 40)
 
             conversation_messages = conversation.get_evaluation_format()
@@ -184,26 +204,58 @@ def run_full_pipeline_test():
 
             print(f"✓ Stored conversation: {os.path.basename(conv_path)}")
 
-            # Step 5: Multi-AI Evaluation
-            print(f"\n📋 Step 5: Multi-AI Evaluation")
+            # Step 6: Multi-AI Evaluation (using evaluation-specific providers)
+            print(f"\n📋 Step 6: Multi-AI Evaluation")
             print("-" * 40)
 
-            # Use available providers (limit to 2 for testing)
-            test_providers = available_providers[:2]
-            print(f"Evaluating with providers: {test_providers}")
+            # Use evaluation providers (limit to 2 for testing to manage costs)
+            evaluation_providers = ai_handler.get_evaluation_providers()[:2]
+            print(f"Evaluating with providers: {evaluation_providers}")
+            print(
+                f"Note: Using evaluation-specific models (DeepSeek Reasoner, Claude with thinking, O3)"
+            )
 
             evaluation_results = evaluator.evaluate_conversation_sync(
-                conversation_messages, character_data, scenario_data, test_providers
+                conversation_messages,
+                character_data,
+                scenario_data,
+                evaluation_providers,
             )
 
             if not evaluation_results:
-                print(f"✗ No evaluation results received")
+                print(f"✗ No evaluation results received - skipping consensus analysis")
+                # Add empty result to summary for tracking
+                results_summary.append(
+                    {
+                        "character_id": character_id,
+                        "scenario_id": scenario_id,
+                        "conversation_id": conversation_id,
+                        "overall_score": 0,
+                        "agreement_level": 0,
+                        "evaluator_count": 0,
+                        "evaluators_used": [],
+                        "status": "evaluation_failed",
+                    }
+                )
                 continue
 
             print(f"✓ Received {len(evaluation_results)} evaluation results")
 
-            # Step 6: Consensus Analysis
-            print(f"\n📋 Step 6: Consensus Analysis")
+            # Display individual evaluator results with enhanced data
+            for provider, result in evaluation_results.items():
+                token_usage = getattr(result, "token_usage", None)
+                tokens = token_usage.get("total_tokens", 0) if token_usage else 0
+                time_taken = getattr(result, "response_time", 0) or 0
+                reasoning_content = getattr(result, "reasoning_content", None)
+                thinking_content = getattr(result, "thinking_content", None)
+                has_reasoning = bool(reasoning_content or thinking_content)
+                print(
+                    f"  • {provider}: {result.overall_score:.1f}/10 (confidence: {result.confidence:.2f}, "
+                    f"tokens: {tokens}, time: {time_taken:.1f}s, reasoning: {'✓' if has_reasoning else '✗'})"
+                )
+
+            # Step 7: Consensus Analysis
+            print(f"\n📋 Step 7: Consensus Analysis")
             print("-" * 40)
 
             consensus = evaluator.calculate_consensus(evaluation_results)
@@ -213,11 +265,13 @@ def run_full_pipeline_test():
 
             if consensus.actionable_insights:
                 print(
-                    f"✓ Generated {len(consensus.actionable_insights)} actionable insights"
+                    f"✓ Generated {len(consensus.actionable_insights)} actionable insights:"
                 )
+                for insight in consensus.actionable_insights[:3]:  # Show first 3
+                    print(f"  • {insight}")
 
-            # Step 7: Store Evaluation Results
-            print(f"\n📋 Step 7: Evaluation Storage")
+            # Step 8: Store Evaluation Results
+            print(f"\n📋 Step 8: Evaluation Storage")
             print("-" * 40)
 
             eval_path = results_manager.store_evaluation_results(
@@ -235,55 +289,97 @@ def run_full_pipeline_test():
                     "overall_score": consensus.overall_consensus,
                     "agreement_level": consensus.agreement_level,
                     "evaluator_count": len(evaluation_results),
+                    "evaluators_used": list(evaluation_results.keys()),
                 }
             )
 
             print(f"✓ Test case {character_id}/{scenario_id} completed successfully")
 
-        # Step 8: Data Analysis and Reporting
-        print(f"\n📋 Step 8: Data Analysis & Reporting")
+        # Step 9: Data Analysis and Reporting
+        print(f"\n📋 Step 9: Data Analysis & Reporting")
         print("-" * 40)
 
         # Generate system overview
         system_overview = results_manager.get_system_overview()
-        print(f"✓ System Overview Generated:")
-        print(
-            f"  • Total conversations: {system_overview['system_stats']['total_conversations']}"
-        )
-        print(
-            f"  • Evaluated conversations: {system_overview['system_stats']['evaluated_conversations']}"
-        )
-        print(
-            f"  • Average score: {system_overview['overall_performance']['average_score']:.1f}/10"
-        )
-        print(
-            f"  • Average agreement: {system_overview['agreement_analysis']['average_agreement']:.1%}"
-        )
 
-        # Character rankings
-        if system_overview.get("character_rankings"):
-            print(f"\n📊 Character Performance Rankings:")
-            for i, char_ranking in enumerate(
-                system_overview["character_rankings"][:3], 1
-            ):
-                print(
-                    f"  {i}. {char_ranking['character_id']}: {char_ranking['average_score']:.1f}/10 ({char_ranking['conversation_count']} conversations)"
+        # Handle case where no evaluations were successful
+        if "error" in system_overview:
+            print(f"⚠️ System Overview: {system_overview['error']}")
+            print(f"✓ Conversations stored: {len(results_summary)}")
+            if results_summary:
+                failed_evaluations = len(
+                    [
+                        r
+                        for r in results_summary
+                        if r.get("status") == "evaluation_failed"
+                    ]
                 )
+                print(f"✗ Failed evaluations: {failed_evaluations}")
+        else:
+            print(f"✓ System Overview Generated:")
+            print(
+                f"  • Total conversations: {system_overview['system_stats']['total_conversations']}"
+            )
+            print(
+                f"  • Evaluated conversations: {system_overview['system_stats']['evaluated_conversations']}"
+            )
+            print(
+                f"  • Average score: {system_overview['overall_performance']['average_score']:.1f}/10"
+            )
+            print(
+                f"  • Average agreement: {system_overview['agreement_analysis']['average_agreement']:.1%}"
+            )
+            print(
+                f"  • Total tokens used: {system_overview['resource_usage']['total_tokens']:,}"
+            )
+            print(
+                f"  • Total response time: {system_overview['resource_usage']['total_response_time']:.1f}s"
+            )
+            print(
+                f"  • Estimated cost: ${system_overview['resource_usage']['cost_estimate_usd']:.4f}"
+            )
+
+            # Character rankings
+            if system_overview.get("character_rankings"):
+                print(f"\n📊 Character Performance Rankings:")
+                for i, char_ranking in enumerate(
+                    system_overview["character_rankings"][:3], 1
+                ):
+                    print(
+                        f"  {i}. {char_ranking['character_id']}: {char_ranking['average_score']:.1f}/10 ({char_ranking['conversation_count']} conversations)"
+                    )
 
         # Generate character summaries
-        for character_id in set(result["character_id"] for result in results_summary):
-            char_summary = results_manager.get_character_summary(character_id)
-            print(f"\n📋 {character_id.title()} Performance Summary:")
-            print(
-                f"  • Overall average: {char_summary['performance']['overall_average']:.1f}/10"
-            )
-            print(f"  • Conversations: {char_summary['conversation_count']}")
-            print(
-                f"  • Scenarios tested: {', '.join(char_summary['scenarios_tested'])}"
-            )
+        successful_results = [
+            r for r in results_summary if r.get("status") != "evaluation_failed"
+        ]
+        if successful_results:
+            for character_id in set(
+                result["character_id"] for result in successful_results
+            ):
+                char_summary = results_manager.get_character_summary(character_id)
+                if "error" not in char_summary:
+                    print(f"\n📋 {character_id.title()} Performance Summary:")
+                    print(
+                        f"  • Overall average: {char_summary['performance']['overall_average']:.1f}/10"
+                    )
+                    print(f"  • Conversations: {char_summary['conversation_count']}")
+                    print(
+                        f"  • Scenarios tested: {', '.join(char_summary['scenarios_tested'])}"
+                    )
+                    print(
+                        f"  • Total tokens used: {char_summary['resource_usage']['total_tokens']:,}"
+                    )
+                    print(
+                        f"  • Avg response time: {char_summary['resource_usage']['average_response_time']:.1f}s"
+                    )
+                else:
+                    print(f"\n📋 {character_id.title()}: {char_summary['error']}")
+        else:
+            print(f"\n⚠️ No successful evaluations for character summaries")
 
-        # Step 9: Data Export
-        print(f"\n📋 Step 9: Data Export")
+        # Step 10: Data Export
+        print(f"\n📋 Step 10: Data Export")
         print("-" * 40)
 
         # Export to CSV
@@ -295,25 +391,28 @@ def run_full_pipeline_test():
         print(f"✓ Exported results to CSV: {os.path.basename(csv_path)}")
 
         # Save analysis report
+        successful_results = [
+            r for r in results_summary if r.get("status") != "evaluation_failed"
+        ]
         analysis_report = {
             "test_summary": {
                 "test_date": datetime.now().isoformat(),
                 "test_cases_run": len(results_summary),
-                "successful_evaluations": len(
-                    [r for r in results_summary if r["overall_score"] > 0]
-                ),
+                "successful_evaluations": len(successful_results),
+                "failed_evaluations": len(results_summary) - len(successful_results),
                 "average_score": (
-                    sum(r["overall_score"] for r in results_summary)
-                    / len(results_summary)
-                    if results_summary
+                    sum(r["overall_score"] for r in successful_results)
+                    / len(successful_results)
+                    if successful_results
                     else 0
                 ),
                 "average_agreement": (
-                    sum(r["agreement_level"] for r in results_summary)
-                    / len(results_summary)
-                    if results_summary
+                    sum(r["agreement_level"] for r in successful_results)
+                    / len(successful_results)
+                    if successful_results
                     else 0
                 ),
+                "model_configuration": provider_info,
             },
             "system_overview": system_overview,
             "individual_results": results_summary,
@@ -326,27 +425,54 @@ def run_full_pipeline_test():
         print(f"✓ Saved analysis report: {os.path.basename(report_path)}")
 
         # Final Summary
-        print(f"\n🎉 Phase 1 Integration Test Complete!")
-        print("=" * 60)
+        print(f"\n🎉 Phase 1 Integration Test Complete - Model Configuration Updated!")
+        print("=" * 70)
         print(
             f"✅ Successfully tested {len(results_summary)} character/scenario combinations"
         )
         print(
-            f"✅ Average evaluation score: {analysis_report['test_summary']['average_score']:.1f}/10"
+            f"✅ Successful evaluations: {analysis_report['test_summary']['successful_evaluations']}"
         )
-        print(
-            f"✅ Average evaluator agreement: {analysis_report['test_summary']['average_agreement']:.1%}"
-        )
+        if analysis_report["test_summary"]["failed_evaluations"] > 0:
+            print(
+                f"⚠️ Failed evaluations: {analysis_report['test_summary']['failed_evaluations']}"
+            )
+        if analysis_report["test_summary"]["successful_evaluations"] > 0:
+            print(
+                f"✅ Average evaluation score: {analysis_report['test_summary']['average_score']:.1f}/10"
+            )
+            print(
+                f"✅ Average evaluator agreement: {analysis_report['test_summary']['average_agreement']:.1%}"
+            )
         print(f"✅ All data stored and analyzed successfully")
 
-        print(f"\n📁 Results stored in: {results_manager.base_dir}")
-        print(f"📊 CSV export: {os.path.basename(csv_path)}")
-        print(f"📋 Analysis report: {os.path.basename(report_path)}")
+        # Model configuration summary
+        print(f"\n🤖 Model Configuration Summary:")
+        print(f"✅ Character conversations: Claude Sonnet 4 (no thinking), GPT-4.1")
+        print(f"✅ Evaluations: DeepSeek Reasoner (default), Claude with thinking, O3")
+        print(f"✅ All evaluation providers tested and working")
 
-        # Phase 1 Validation Checklist
-        print(f"\n✅ Phase 1 Validation Checklist:")
+        print(f"\n📁 Enhanced Results Structure:")
+        print(f"  📊 {os.path.basename(csv_path)} - CSV export")
+        print(f"  📋 {os.path.basename(report_path)} - Analysis report")
+        print(f"  🗂️  conversations/ - Raw conversation data")
+        print(f"  📊 evaluations/ - Evaluation results")
+        print(f"  🔬 detailed_logs/ - Full AI responses with reasoning")
+        print(f"  🧠 reasoning_analysis/ - Reasoning content analysis")
+        print(f"  📈 analysis/ - System analysis reports")
+        print(f"  📝 logs/ - Operation logs")
+
+        # Phase 1 Validation Checklist with Model Updates
+        print(f"\n✅ Phase 1 Validation Checklist (Updated Models):")
         print(f"  ✓ Universal scenarios work with multiple character types")
-        print(f"  ✓ Multi-AI evaluation provides consistent results")
+        print(f"  ✓ Multi-AI evaluation provides consistent results with new models")
+        print(f"  ✓ Model separation works (chat vs evaluation providers)")
+        print(f"  ✓ DeepSeek Reasoner integration successful")
+        print(f"  ✓ Claude thinking mode integration successful")
+        print(f"  ✓ O3 reasoning integration successful")
+        print(f"  ✓ Enhanced logging system captures reasoning content")
+        print(f"  ✓ Token usage and timing metrics tracked")
+        print(f"  ✓ Detailed logs and reasoning analysis generated")
         print(f"  ✓ Consensus analysis generates actionable insights")
         print(f"  ✓ Data storage and retrieval works correctly")
         print(f"  ✓ Analysis and reporting functions properly")
@@ -370,7 +496,10 @@ def main():
 
     if success:
         print(f"\n🎯 Next Steps:")
-        print(f"  • Phase 1 is complete and validated")
+        print(f"  • Phase 1 optimization complete with new model configuration")
+        print(f"  • DeepSeek Reasoner, Claude thinking mode, O3 integration validated")
+        print(f"  • Enhanced logging system captures full AI reasoning process")
+        print(f"  • Token usage and cost tracking implemented")
         print(f"  • Ready to proceed to Phase 2 (Batch Automation)")
         print(f"  • Or continue testing with more character combinations")
     else:

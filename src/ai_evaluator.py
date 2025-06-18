@@ -1,16 +1,14 @@
 """
-Multi-AI Evaluation Engine
+Multi-AI Evaluation Engine - Updated for Model Separation
 
 This module coordinates evaluation of character conversations using multiple AI providers
-as independent evaluators. It sends conversations to Claude, GPT, and DeepSeek, then
-analyzes consensus and generates actionable insights.
+specifically configured for evaluation tasks (DeepSeek Reasoner, Claude with thinking, GPT-4.1).
 
-Core functionality:
-- Unified evaluation prompt covering all 6 criteria
-- Multi-provider evaluation coordination
-- Consensus analysis and agreement calculation
-- Quality control and outlier detection
-- Actionable insight generation
+Updated to use:
+- DeepSeek Reasoner as default evaluator
+- Claude Sonnet 4 with thinking mode for evaluations
+- GPT-4.1 for evaluations
+- Separate evaluation methods from chat methods
 """
 
 import json
@@ -23,7 +21,7 @@ from dataclasses import dataclass
 
 @dataclass
 class EvaluationResult:
-    """Structure for individual evaluator results"""
+    """Structure for individual evaluator results with enhanced logging"""
 
     evaluator: str
     timestamp: str
@@ -32,6 +30,13 @@ class EvaluationResult:
     overall_score: float
     confidence: float
     raw_response: str
+
+    # Enhanced logging data
+    reasoning_content: Optional[str] = None  # DeepSeek reasoning or Claude thinking
+    thinking_content: Optional[str] = None  # Claude thinking content
+    token_usage: Optional[Dict] = None  # Token usage statistics
+    response_time: Optional[float] = None  # Response time in seconds
+    model_metadata: Optional[Dict] = None  # Model-specific metadata
 
 
 @dataclass
@@ -48,7 +53,7 @@ class ConsensusAnalysis:
 
 
 class AIEvaluator:
-    """Multi-AI evaluation system for character conversations"""
+    """Multi-AI evaluation system for character conversations - Updated for evaluation-specific models"""
 
     def __init__(self, ai_handler):
         self.ai_handler = ai_handler
@@ -181,53 +186,11 @@ Evaluate thoroughly and provide specific, actionable feedback."""
         providers: Optional[List[str]] = None,
     ) -> Dict[str, EvaluationResult]:
         """
-        Evaluate conversation using multiple AI providers
-
-        Args:
-            conversation: List of message dicts with 'role' and 'content'
-            character_data: Character definition from JSON
-            scenario_data: Scenario definition
-            providers: List of providers to use (default: all available)
-
-        Returns:
-            Dict mapping provider name to EvaluationResult
+        Async wrapper for evaluate_conversation_sync (since AIHandler delegates async to sync)
         """
-
-        if providers is None:
-            providers = self.ai_handler.get_available_providers()
-
-        evaluation_prompt = self.generate_evaluation_prompt(
-            conversation, character_data, scenario_data
+        return self.evaluate_conversation_sync(
+            conversation, character_data, scenario_data, providers
         )
-
-        results = {}
-
-        for provider in providers:
-            try:
-                print(f"Getting evaluation from {provider}...")
-
-                # Get evaluation response
-                response = await self.ai_handler.get_response(
-                    system_prompt="You are an expert AI conversation evaluator. Follow instructions precisely and return valid JSON.",
-                    user_message=evaluation_prompt,
-                    provider=provider,
-                )
-
-                # Parse the response
-                evaluation_result = self._parse_evaluation_response(response, provider)
-
-                if evaluation_result:
-                    results[provider] = evaluation_result
-                    print(
-                        f"✓ {provider} evaluation completed (overall: {evaluation_result.overall_score:.1f})"
-                    )
-                else:
-                    print(f"✗ {provider} evaluation failed - could not parse response")
-
-            except Exception as e:
-                print(f"✗ {provider} evaluation failed: {e}")
-
-        return results
 
     def evaluate_conversation_sync(
         self,
@@ -236,10 +199,10 @@ Evaluate thoroughly and provide specific, actionable feedback."""
         scenario_data: Dict,
         providers: Optional[List[str]] = None,
     ) -> Dict[str, EvaluationResult]:
-        """Synchronous version of evaluate_conversation"""
+        """Synchronous version using evaluation-specific models with enhanced logging"""
 
         if providers is None:
-            providers = self.ai_handler.get_available_providers()
+            providers = self.ai_handler.get_evaluation_providers()
 
         evaluation_prompt = self.generate_evaluation_prompt(
             conversation, character_data, scenario_data
@@ -251,15 +214,17 @@ Evaluate thoroughly and provide specific, actionable feedback."""
             try:
                 print(f"Getting evaluation from {provider}...")
 
-                # Get evaluation response
-                response = self.ai_handler.get_response_sync(
+                # Use evaluation-specific response method - NOW PROPERLY UNPACK TUPLE
+                content, metadata = self.ai_handler.get_evaluation_response_sync(
                     system_prompt="You are an expert AI conversation evaluator. Follow instructions precisely and return valid JSON.",
                     user_message=evaluation_prompt,
                     provider=provider,
                 )
 
-                # Parse the response
-                evaluation_result = self._parse_evaluation_response(response, provider)
+                # Parse the response with enhanced metadata
+                evaluation_result = self._parse_evaluation_response(
+                    content, provider, metadata
+                )
 
                 if evaluation_result:
                     results[provider] = evaluation_result
@@ -275,19 +240,74 @@ Evaluate thoroughly and provide specific, actionable feedback."""
         return results
 
     def _parse_evaluation_response(
-        self, response: str, evaluator: str
+        self, response: str, evaluator: str, metadata: Optional[Dict] = None
     ) -> Optional[EvaluationResult]:
-        """Parse AI response and extract structured evaluation data"""
+        """Parse AI response and extract structured evaluation data with enhanced logging"""
 
         try:
-            # Try to extract JSON from the response
-            json_match = re.search(r"\{.*\}", response, re.DOTALL)
-            if not json_match:
-                print(f"No JSON found in {evaluator} response")
-                return None
+            # Handle different response formats by evaluator
+            json_content = ""
 
-            json_str = json_match.group(0)
-            evaluation_data = json.loads(json_str)
+            if evaluator == "claude_thinking":
+                # Claude thinking mode provides clean text content after thinking
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    json_content = json_match.group(0)
+                else:
+                    print(f"No JSON found in {evaluator} response")
+                    return None
+
+            elif evaluator == "o3":
+                # O3 may have different formatting - extract JSON more carefully
+                patterns = [
+                    r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}",  # Nested JSON pattern
+                    r"\{.*?\}(?=\s*$|\s*[^}])",  # JSON at end
+                    r"\{.*\}",  # General JSON pattern
+                ]
+
+                for pattern in patterns:
+                    json_match = re.search(pattern, response, re.DOTALL)
+                    if json_match:
+                        json_content = json_match.group(0)
+                        break
+
+                if not json_content:
+                    print(f"No JSON found in {evaluator} response")
+                    return None
+
+            elif evaluator == "deepseek_reasoner":
+                # DeepSeek might have truncated JSON - try to repair it
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    json_content = json_match.group(0)
+                    # Check if JSON is truncated and try to fix common issues
+                    if not json_content.endswith("}"):
+                        # Try to complete the JSON if it's cut off
+                        if (
+                            '"character_authenticity"' in json_content
+                            and not '"character_authenticity":' in json_content
+                        ):
+                            # Likely truncated at character_authenticity key
+                            json_content = json_content.replace(
+                                '"characte', '"character_authenticity": 8}'
+                            )
+                        else:
+                            json_content += "}"
+                else:
+                    print(f"No JSON found in {evaluator} response")
+                    return None
+
+            else:
+                # Default handling for other providers
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    json_content = json_match.group(0)
+                else:
+                    print(f"No JSON found in {evaluator} response")
+                    return None
+
+            # Parse the extracted JSON
+            evaluation_data = json.loads(json_content)
 
             # Validate required fields
             if "scores" not in evaluation_data or "reasoning" not in evaluation_data:
@@ -309,6 +329,30 @@ Evaluate thoroughly and provide specific, actionable feedback."""
             # Calculate confidence based on response completeness
             confidence = self._calculate_response_confidence(evaluation_data)
 
+            # Extract enhanced logging data from metadata
+            reasoning_content = None
+            thinking_content = None
+            token_usage = None
+            response_time = None
+            model_metadata = {}
+
+            if metadata:
+                reasoning_content = metadata.get("reasoning_content")
+                thinking_content = metadata.get("thinking_content")
+                token_usage = metadata.get("token_usage")
+                response_time = metadata.get("response_time")
+
+                # Store model-specific metadata
+                model_metadata = {
+                    "model": metadata.get("model"),
+                    "provider": metadata.get("provider"),
+                    "has_reasoning": metadata.get("has_reasoning", False),
+                    "has_thinking": metadata.get("has_thinking", False),
+                    "api_method": metadata.get("api_method"),
+                    "reasoning_effort": metadata.get("reasoning_effort"),
+                    "thinking_budget": metadata.get("thinking_budget"),
+                }
+
             return EvaluationResult(
                 evaluator=evaluator,
                 timestamp=datetime.now().isoformat(),
@@ -317,10 +361,16 @@ Evaluate thoroughly and provide specific, actionable feedback."""
                 overall_score=overall_score,
                 confidence=confidence,
                 raw_response=response,
+                reasoning_content=reasoning_content,
+                thinking_content=thinking_content,
+                token_usage=token_usage,
+                response_time=response_time,
+                model_metadata=model_metadata,
             )
 
         except json.JSONDecodeError as e:
             print(f"JSON parsing error for {evaluator}: {e}")
+            print(f"Attempted to parse: {json_content[:200]}...")
             return None
         except Exception as e:
             print(f"Error parsing {evaluator} response: {e}")

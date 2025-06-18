@@ -1,15 +1,14 @@
 """
-Results Manager - Data Storage and Basic Analysis
+Enhanced Results Manager - Data Storage and Analysis with Reasoning Logging
 
-This module handles storage, retrieval, and preliminary analysis of evaluation results.
-It provides the data infrastructure for the character evaluation system.
+This module handles storage, retrieval, and preliminary analysis of evaluation results
+with comprehensive logging of AI reasoning content, token usage, and timing data.
 
-Core functionality:
-- Store conversation data and evaluation results
-- Generate unique IDs and organize data files
-- Perform basic analysis and consensus calculations
-- Export data in multiple formats
-- Track evaluation system reliability
+Enhanced functionality:
+- Store reasoning/thinking content from AI models
+- Track token usage and response times
+- Organize detailed logs by session and provider
+- Generate reasoning analysis reports
 """
 
 import json
@@ -21,11 +20,12 @@ from dataclasses import asdict
 import statistics
 import csv
 
+# Import the enhanced EvaluationResult and ConsensusAnalysis
 from ai_evaluator import EvaluationResult, ConsensusAnalysis
 
 
-class ResultsManager:
-    """Manage storage and analysis of evaluation results"""
+class EnhancedResultsManager:
+    """Enhanced manager for evaluation results with comprehensive logging"""
 
     def __init__(self, base_dir: str = "evaluation_results"):
         self.base_dir = base_dir
@@ -34,6 +34,10 @@ class ResultsManager:
         self.analysis_dir = os.path.join(base_dir, "analysis")
         self.logs_dir = os.path.join(base_dir, "logs")
         self.exports_dir = os.path.join(base_dir, "exports")
+
+        # New enhanced logging directories
+        self.detailed_logs_dir = os.path.join(base_dir, "detailed_logs")
+        self.reasoning_analysis_dir = os.path.join(base_dir, "reasoning_analysis")
 
         self._ensure_directories()
         self._setup_logging()
@@ -47,12 +51,14 @@ class ResultsManager:
             self.analysis_dir,
             self.logs_dir,
             self.exports_dir,
+            self.detailed_logs_dir,
+            self.reasoning_analysis_dir,
         ]
 
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
 
-        print(f"✓ Results directories initialized in {self.base_dir}")
+        print(f"✓ Enhanced results directories initialized in {self.base_dir}")
 
     def _setup_logging(self):
         """Setup logging for evaluation operations"""
@@ -62,7 +68,7 @@ class ResultsManager:
         if not os.path.exists(self.log_file):
             with open(self.log_file, "w") as f:
                 f.write(
-                    f"Evaluation System Log - Created {datetime.now().isoformat()}\n"
+                    f"Enhanced Evaluation System Log - Created {datetime.now().isoformat()}\n"
                 )
                 f.write("=" * 60 + "\n\n")
 
@@ -108,11 +114,7 @@ class ResultsManager:
         messages: List[Dict],
         metadata: Optional[Dict] = None,
     ) -> str:
-        """
-        Store conversation data
-
-        Returns the file path where conversation was stored
-        """
+        """Store conversation data"""
 
         conversation_data = {
             "conversation_id": conversation_id,
@@ -155,15 +157,14 @@ class ResultsManager:
         evaluation_results: Dict[str, EvaluationResult],
         consensus_analysis: ConsensusAnalysis,
     ) -> str:
-        """
-        Store evaluation results and consensus analysis
+        """Store evaluation results with enhanced logging data"""
 
-        Returns the file path where evaluation was stored
-        """
-
-        # Convert evaluation results to dict format
+        # Convert evaluation results to dict format with enhanced data
         evaluations_dict = {}
+        detailed_logs = {}
+
         for provider, result in evaluation_results.items():
+            # Basic evaluation data
             evaluations_dict[provider] = {
                 "evaluator": result.evaluator,
                 "timestamp": result.timestamp,
@@ -171,7 +172,43 @@ class ResultsManager:
                 "reasoning": result.reasoning,
                 "overall_score": result.overall_score,
                 "confidence": result.confidence,
-                "raw_response_length": len(result.raw_response),
+                "response_time": getattr(result, "response_time", None),
+            }
+
+            # Enhanced logging data stored separately
+            detailed_logs[provider] = {
+                "raw_response": result.raw_response,
+                "reasoning_content": getattr(result, "reasoning_content", None),
+                "thinking_content": getattr(result, "thinking_content", None),
+                "token_usage": getattr(result, "token_usage", None),
+                "model_metadata": getattr(result, "model_metadata", None),
+                "response_time": getattr(result, "response_time", None),
+                "full_evaluation_data": {
+                    "provider": provider,
+                    "model": (
+                        getattr(result, "model_metadata", {}).get("model")
+                        if getattr(result, "model_metadata", None)
+                        else None
+                    ),
+                    "api_method": (
+                        getattr(result, "model_metadata", {}).get("api_method")
+                        if getattr(result, "model_metadata", None)
+                        else None
+                    ),
+                    "has_reasoning": (
+                        getattr(result, "model_metadata", {}).get(
+                            "has_reasoning", False
+                        )
+                        if getattr(result, "model_metadata", None)
+                        else False
+                    ),
+                    "reasoning_length": len(
+                        getattr(result, "reasoning_content", "") or ""
+                    ),
+                    "thinking_length": len(
+                        getattr(result, "thinking_content", "") or ""
+                    ),
+                },
             }
 
         # Convert consensus analysis to dict
@@ -185,6 +222,7 @@ class ResultsManager:
             "actionable_insights": consensus_analysis.actionable_insights,
         }
 
+        # Main evaluation data
         evaluation_data = {
             "evaluation_id": f"{conversation_id}_eval",
             "conversation_id": conversation_id,
@@ -194,25 +232,137 @@ class ResultsManager:
             "meta": {
                 "evaluator_count": len(evaluation_results),
                 "criteria_evaluated": list(consensus_analysis.consensus_scores.keys()),
+                "total_tokens_used": sum(
+                    (
+                        getattr(result, "token_usage", {}).get("total_tokens", 0)
+                        if getattr(result, "token_usage", None)
+                        else 0
+                    )
+                    for result in evaluation_results.values()
+                ),
+                "total_response_time": sum(
+                    getattr(result, "response_time", 0) or 0
+                    for result in evaluation_results.values()
+                ),
+                "providers_with_reasoning": [
+                    provider
+                    for provider, result in evaluation_results.items()
+                    if getattr(result, "reasoning_content", None)
+                    or getattr(result, "thinking_content", None)
+                ],
             },
         }
 
         # Serialize datetime objects
         serializable_data = self._serialize_datetime_objects(evaluation_data)
+        detailed_logs_serializable = self._serialize_datetime_objects(detailed_logs)
 
-        # Store evaluation results
+        # Store main evaluation results
         filename = f"{conversation_id}_eval.json"
         filepath = os.path.join(self.evaluations_dir, filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(serializable_data, f, indent=2, ensure_ascii=False)
 
+        # Store detailed logs separately
+        detailed_filename = f"{conversation_id}_detailed_logs.json"
+        detailed_filepath = os.path.join(self.detailed_logs_dir, detailed_filename)
+
+        with open(detailed_filepath, "w", encoding="utf-8") as f:
+            json.dump(detailed_logs_serializable, f, indent=2, ensure_ascii=False)
+
+        # Generate reasoning analysis
+        self._generate_reasoning_analysis(conversation_id, evaluation_results)
+
         self.log_operation(
             "STORE_EVALUATION",
-            f"Conversation: {conversation_id}, Evaluators: {len(evaluation_results)}, Consensus: {consensus_analysis.overall_consensus:.1f}",
+            f"Conversation: {conversation_id}, Evaluators: {len(evaluation_results)}, "
+            f"Consensus: {consensus_analysis.overall_consensus:.1f}, "
+            f"Total tokens: {evaluation_data['meta']['total_tokens_used']}, "
+            f"Total time: {evaluation_data['meta']['total_response_time']:.2f}s",
         )
 
         return filepath
+
+    def _generate_reasoning_analysis(
+        self, conversation_id: str, evaluation_results: Dict[str, EvaluationResult]
+    ) -> None:
+        """Generate analysis of reasoning content from evaluators"""
+
+        reasoning_analysis = {
+            "conversation_id": conversation_id,
+            "analysis_timestamp": datetime.now().isoformat(),
+            "evaluator_reasoning": {},
+            "reasoning_summary": {
+                "total_evaluators": len(evaluation_results),
+                "evaluators_with_reasoning": 0,
+                "average_reasoning_length": 0,
+                "reasoning_themes": [],
+            },
+        }
+
+        total_reasoning_length = 0
+        evaluators_with_reasoning = 0
+
+        for provider, result in evaluation_results.items():
+            evaluator_data = {
+                "provider": provider,
+                "has_reasoning": bool(
+                    getattr(result, "reasoning_content", None)
+                    or getattr(result, "thinking_content", None)
+                ),
+                "reasoning_length": 0,
+                "thinking_length": 0,
+                "reasoning_preview": "",
+                "thinking_preview": "",
+                "token_efficiency": None,
+            }
+
+            reasoning_content = getattr(result, "reasoning_content", None)
+            thinking_content = getattr(result, "thinking_content", None)
+            token_usage = getattr(result, "token_usage", None)
+
+            if reasoning_content:
+                evaluator_data["reasoning_length"] = len(reasoning_content)
+                evaluator_data["reasoning_preview"] = (
+                    reasoning_content[:300] + "..."
+                    if len(reasoning_content) > 300
+                    else reasoning_content
+                )
+                total_reasoning_length += len(reasoning_content)
+                evaluators_with_reasoning += 1
+
+            if thinking_content:
+                evaluator_data["thinking_length"] = len(thinking_content)
+                evaluator_data["thinking_preview"] = (
+                    thinking_content[:300] + "..."
+                    if len(thinking_content) > 300
+                    else thinking_content
+                )
+
+            # Calculate token efficiency (score per token)
+            if token_usage and token_usage.get("total_tokens", 0) > 0:
+                evaluator_data["token_efficiency"] = (
+                    result.overall_score / token_usage["total_tokens"]
+                )
+
+            reasoning_analysis["evaluator_reasoning"][provider] = evaluator_data
+
+        # Update summary
+        reasoning_analysis["reasoning_summary"][
+            "evaluators_with_reasoning"
+        ] = evaluators_with_reasoning
+        if evaluators_with_reasoning > 0:
+            reasoning_analysis["reasoning_summary"]["average_reasoning_length"] = (
+                total_reasoning_length / evaluators_with_reasoning
+            )
+
+        # Save reasoning analysis
+        analysis_filename = f"{conversation_id}_reasoning_analysis.json"
+        analysis_filepath = os.path.join(self.reasoning_analysis_dir, analysis_filename)
+
+        with open(analysis_filepath, "w", encoding="utf-8") as f:
+            json.dump(reasoning_analysis, f, indent=2, ensure_ascii=False)
 
     def load_conversation(self, conversation_id: str) -> Optional[Dict]:
         """Load conversation data by ID"""
@@ -229,6 +379,28 @@ class ResultsManager:
         """Load evaluation results by conversation ID"""
         filename = f"{conversation_id}_eval.json"
         filepath = os.path.join(self.evaluations_dir, filename)
+
+        if not os.path.exists(filepath):
+            return None
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def load_detailed_logs(self, conversation_id: str) -> Optional[Dict]:
+        """Load detailed logs with reasoning content"""
+        filename = f"{conversation_id}_detailed_logs.json"
+        filepath = os.path.join(self.detailed_logs_dir, filename)
+
+        if not os.path.exists(filepath):
+            return None
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def load_reasoning_analysis(self, conversation_id: str) -> Optional[Dict]:
+        """Load reasoning analysis for a conversation"""
+        filename = f"{conversation_id}_reasoning_analysis.json"
+        filepath = os.path.join(self.reasoning_analysis_dir, filename)
 
         if not os.path.exists(filepath):
             return None
@@ -262,7 +434,7 @@ class ResultsManager:
         return conversation_ids
 
     def get_character_summary(self, character_id: str) -> Dict:
-        """Generate performance summary for a specific character"""
+        """Generate performance summary for a specific character with enhanced metrics"""
         conversation_ids = self.list_conversations(character_id=character_id)
 
         if not conversation_ids:
@@ -275,6 +447,8 @@ class ResultsManager:
         evaluations = []
         scenarios = set()
         providers = set()
+        total_tokens = 0
+        total_response_time = 0
 
         for conv_id in conversation_ids:
             eval_data = self.load_evaluation(conv_id)
@@ -286,6 +460,11 @@ class ResultsManager:
                 if conv_data:
                     scenarios.add(conv_data.get("scenario_id", "unknown"))
                     providers.add(conv_data.get("provider", "unknown"))
+
+                # Add token and timing data
+                meta = eval_data.get("meta", {})
+                total_tokens += meta.get("total_tokens_used", 0)
+                total_response_time += meta.get("total_response_time", 0)
 
         if not evaluations:
             return {
@@ -338,6 +517,16 @@ class ResultsManager:
                 "min_agreement": min(agreement_levels),
                 "max_agreement": max(agreement_levels),
             },
+            "resource_usage": {
+                "total_tokens": total_tokens,
+                "total_response_time": total_response_time,
+                "average_tokens_per_evaluation": (
+                    total_tokens / len(evaluations) if evaluations else 0
+                ),
+                "average_response_time": (
+                    total_response_time / len(evaluations) if evaluations else 0
+                ),
+            },
             "common_insights": list(set(all_insights)),
             "timestamp": datetime.now().isoformat(),
         }
@@ -345,7 +534,7 @@ class ResultsManager:
         return summary
 
     def get_system_overview(self) -> Dict:
-        """Generate overview of entire evaluation system"""
+        """Generate overview of entire evaluation system with enhanced metrics"""
         all_conversations = self.list_conversations()
 
         if not all_conversations:
@@ -355,6 +544,8 @@ class ResultsManager:
         scenarios = set()
         providers = set()
         evaluations_with_data = []
+        total_system_tokens = 0
+        total_system_time = 0
 
         for conv_id in all_conversations:
             conv_data = self.load_conversation(conv_id)
@@ -366,6 +557,10 @@ class ResultsManager:
                 providers.add(conv_data.get("provider", "unknown"))
 
             if eval_data and "consensus" in eval_data:
+                meta = eval_data.get("meta", {})
+                total_system_tokens += meta.get("total_tokens_used", 0)
+                total_system_time += meta.get("total_response_time", 0)
+
                 evaluations_with_data.append(
                     {
                         "conversation_id": conv_id,
@@ -376,6 +571,8 @@ class ResultsManager:
                             conv_data.get("scenario_id") if conv_data else "unknown"
                         ),
                         "consensus": eval_data["consensus"],
+                        "tokens_used": meta.get("total_tokens_used", 0),
+                        "response_time": meta.get("total_response_time", 0),
                     }
                 )
 
@@ -444,6 +641,21 @@ class ResultsManager:
                 "min_agreement": min(agreement_levels),
                 "max_agreement": max(agreement_levels),
             },
+            "resource_usage": {
+                "total_tokens": total_system_tokens,
+                "total_response_time": total_system_time,
+                "average_tokens_per_evaluation": (
+                    total_system_tokens / len(evaluations_with_data)
+                    if evaluations_with_data
+                    else 0
+                ),
+                "average_response_time": (
+                    total_system_time / len(evaluations_with_data)
+                    if evaluations_with_data
+                    else 0
+                ),
+                "cost_estimate_usd": self._estimate_cost(total_system_tokens),
+            },
             "character_rankings": character_rankings,
             "coverage": {
                 "characters": list(characters),
@@ -455,8 +667,21 @@ class ResultsManager:
 
         return overview
 
+    def _estimate_cost(self, total_tokens: int) -> float:
+        """Rough cost estimate based on token usage"""
+        # Rough estimates (actual costs vary by provider)
+        cost_per_1k_tokens = {
+            "deepseek": 0.0002,  # DeepSeek Reasoner
+            "claude": 0.003,  # Claude Sonnet 4
+            "o3": 0.02,  # O3 (higher cost for reasoning)
+        }
+
+        # Use average cost
+        avg_cost = statistics.mean(cost_per_1k_tokens.values())
+        return (total_tokens / 1000) * avg_cost
+
     def export_to_csv(self, output_path: str) -> str:
-        """Export all evaluation data to CSV format"""
+        """Export all evaluation data to CSV format with enhanced metrics"""
         all_conversations = self.list_conversations()
 
         if not all_conversations:
@@ -472,6 +697,7 @@ class ResultsManager:
                 continue
 
             consensus = eval_data.get("consensus", {})
+            meta = eval_data.get("meta", {})
 
             row = {
                 "conversation_id": conv_id,
@@ -483,6 +709,9 @@ class ResultsManager:
                 "overall_consensus": consensus.get("overall_consensus", 0),
                 "agreement_level": consensus.get("agreement_level", 0),
                 "confidence_level": consensus.get("confidence_level", 0),
+                "total_tokens": meta.get("total_tokens_used", 0),
+                "total_response_time": meta.get("total_response_time", 0),
+                "evaluator_count": meta.get("evaluator_count", 0),
             }
 
             # Add individual criteria scores
@@ -520,13 +749,17 @@ class ResultsManager:
         return filepath
 
 
+# Alias for backward compatibility
+ResultsManager = EnhancedResultsManager
+
+
 # Testing and utility functions
-def test_results_manager():
-    """Test the results manager functionality"""
-    print("Testing Results Manager...")
+def test_enhanced_results_manager():
+    """Test the enhanced results manager functionality"""
+    print("Testing Enhanced Results Manager...")
 
     # Initialize
-    manager = ResultsManager("test_evaluation_results")
+    manager = EnhancedResultsManager("test_enhanced_evaluation_results")
 
     # Test conversation storage
     test_conversation = [
@@ -552,8 +785,8 @@ def test_results_manager():
     loaded_conv = manager.load_conversation(conv_id)
     print(f"Loaded conversation: {loaded_conv['conversation_id']}")
 
-    print("✓ Results Manager test completed")
+    print("✓ Enhanced Results Manager test completed")
 
 
 if __name__ == "__main__":
-    test_results_manager()
+    test_enhanced_results_manager()

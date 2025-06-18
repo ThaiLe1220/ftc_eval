@@ -17,13 +17,27 @@ class ChatCLI:
         self.current_character_id: Optional[str] = None
         self.user_name = ""
         self.user_gender = ""
-        self.current_provider = self.ai_handler.default_provider
+        self.current_provider = self.ai_handler.default_chat_provider
 
-        print(f"{Fore.GREEN}🤖 Character Chatbot CLI{Style.RESET_ALL}")
         print(
-            f"Available AI providers: {', '.join(self.ai_handler.get_available_providers())}"
+            f"{Fore.GREEN}🤖 Character Chatbot CLI - Updated Model Configuration{Style.RESET_ALL}"
         )
-        print(f"Default provider: {self.current_provider}")
+
+        # Display new model configuration
+        provider_info = self.ai_handler.get_provider_info()
+        print(f"📱 Character Chat Models: {', '.join(provider_info['chat_providers'])}")
+        print(
+            f"🧠 Evaluation Models: {', '.join(provider_info['evaluation_providers'])}"
+        )
+        print(f"🎯 Default Chat Provider: {provider_info['default_chat']}")
+        print(f"📊 Default Evaluation Provider: {provider_info['default_evaluation']}")
+        print()
+        print(f"{Fore.CYAN}Model Details:{Style.RESET_ALL}")
+        for model_name, version in provider_info["model_versions"].items():
+            if model_name in ["claude", "gpt"]:  # Chat models
+                print(f"  💬 {model_name}: {version}")
+            else:  # Evaluation models
+                print(f"  🧠 {model_name}: {version}")
         print()
 
     def setup_user(self) -> None:
@@ -149,7 +163,10 @@ class ChatCLI:
     def chat_loop(self) -> None:
         """Main chat interaction loop"""
         print(
-            f"\n{Fore.YELLOW}💬 Chat started! Commands: /switch, /provider, /info, /clear, /quit{Style.RESET_ALL}\n"
+            f"\n{Fore.YELLOW}💬 Chat started! Commands: /switch, /provider, /info, /models, /clear, /quit{Style.RESET_ALL}"
+        )
+        print(
+            f"{Fore.CYAN}Note: Using {self.current_provider} for character conversations{Style.RESET_ALL}\n"
         )
 
         while True:
@@ -175,6 +192,9 @@ class ChatCLI:
                 elif user_input.lower() == "/info":
                     self.show_info()
                     continue
+                elif user_input.lower() == "/models":
+                    self.show_model_info()
+                    continue
                 elif user_input.lower() == "/clear":
                     self.current_conversation.clear_history()
                     print(
@@ -183,14 +203,14 @@ class ChatCLI:
                     continue
                 elif user_input.lower().startswith("/"):
                     print(
-                        f"{Fore.RED}Unknown command. Available: /switch, /provider, /info, /clear, /quit{Style.RESET_ALL}"
+                        f"{Fore.RED}Unknown command. Available: /switch, /provider, /info, /models, /clear, /quit{Style.RESET_ALL}"
                     )
                     continue
 
                 # Add user message to conversation
                 self.current_conversation.add_message("user", user_input)
 
-                # Generate AI response
+                # Generate AI response using chat-specific method
                 print(f"{Fore.YELLOW}Thinking...{Style.RESET_ALL}")
 
                 system_prompt = self.character_manager.generate_system_prompt(
@@ -200,6 +220,7 @@ class ChatCLI:
                     self.current_conversation.get_formatted_history(),
                 )
 
+                # Use get_response_sync for character conversations (no thinking mode)
                 ai_response = self.ai_handler.get_response_sync(
                     system_prompt, user_input, self.current_provider
                 )
@@ -216,26 +237,26 @@ class ChatCLI:
                 print(f"{Fore.RED}Error: {e}{Style.RESET_ALL}")
 
     def switch_provider(self) -> None:
-        """Switch AI provider"""
-        providers = self.ai_handler.get_available_providers()
+        """Switch AI provider (chat providers only)"""
+        chat_providers = self.ai_handler.get_chat_providers()
 
-        if len(providers) <= 1:
+        if len(chat_providers) <= 1:
             print(
-                f"{Fore.YELLOW}Only one provider available: {self.current_provider}{Style.RESET_ALL}"
+                f"{Fore.YELLOW}Only one chat provider available: {self.current_provider}{Style.RESET_ALL}"
             )
             return
 
-        print(f"\nAvailable providers:")
-        for i, provider in enumerate(providers, 1):
+        print(f"\nAvailable chat providers:")
+        for i, provider in enumerate(chat_providers, 1):
             current = " (current)" if provider == self.current_provider else ""
             print(f"{i}. {provider}{current}")
 
         try:
             choice = int(input("Select provider: ").strip()) - 1
-            if 0 <= choice < len(providers):
-                self.current_provider = providers[choice]
+            if 0 <= choice < len(chat_providers):
+                self.current_provider = chat_providers[choice]
                 print(
-                    f"{Fore.GREEN}✓ Switched to {self.current_provider}{Style.RESET_ALL}"
+                    f"{Fore.GREEN}✓ Switched to {self.current_provider} for character conversations{Style.RESET_ALL}"
                 )
             else:
                 print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
@@ -255,9 +276,36 @@ class ChatCLI:
         print(
             f"Character: {character['name']} ({character.get('category', 'Unknown')})"
         )
-        print(f"AI Provider: {self.current_provider}")
+        print(f"Chat Provider: {self.current_provider}")
         print(f"Messages: {self.current_conversation.get_message_count()}")
         print(f"Description: {character['description']}")
+        print()
+
+    def show_model_info(self) -> None:
+        """Show detailed model configuration"""
+        provider_info = self.ai_handler.get_provider_info()
+
+        print(f"\n{Fore.CYAN}🤖 Model Configuration:{Style.RESET_ALL}")
+        print(f"\n{Fore.GREEN}Character Chat Models:{Style.RESET_ALL}")
+        for provider in provider_info["chat_providers"]:
+            current = " (current)" if provider == self.current_provider else ""
+            model_version = provider_info["model_versions"].get(provider, "Unknown")
+            print(f"  • {provider}: {model_version}{current}")
+
+        print(f"\n{Fore.BLUE}Evaluation Models:{Style.RESET_ALL}")
+        for provider in provider_info["evaluation_providers"]:
+            default = (
+                " (default)" if provider == provider_info["default_evaluation"] else ""
+            )
+            model_version = provider_info["model_versions"].get(provider, "Unknown")
+            print(f"  • {provider}: {model_version}{default}")
+
+        print(f"\n{Fore.YELLOW}Note:{Style.RESET_ALL}")
+        print(f"  • Character conversations use natural, spontaneous responses")
+        print(
+            f"  • Evaluation tasks use reasoning-enhanced models (DeepSeek, Claude thinking, O3)"
+        )
+        print(f"  • Switch providers with /provider command")
         print()
 
     def run(self) -> None:
