@@ -237,8 +237,7 @@ class AIHandler:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                max_tokens=4000,  # Increased to prevent truncation
-                temperature=0.1,  # Low temperature for consistent evaluation
+                temperature=0.3,
             )
 
             # DeepSeek Reasoner provides both reasoning_content and content
@@ -457,6 +456,77 @@ class AIHandler:
                 "claude_thinking": "claude-sonnet-4-20250514 (with thinking)",
                 "deepseek_reasoner": "deepseek-reasoner",
                 "o3": "o3 (with reasoning)",
-                "gpt": "gpt-4.1",  # Updated to GPT-4.1
+                "gpt": "gpt-4.1",
             },
         }
+
+    def get_user_response_for_conversation(
+        self, system_prompt: str, user_prompt: str
+    ) -> str:
+        """Generate user response for conversation automation using GPT-4.1 (always)"""
+
+        if not self.openai_client:
+            raise ValueError("GPT-4.1 not available for user response generation")
+
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=450,
+                temperature=0.9,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error generating user response: {e}"
+
+    def validate_conversation_response_quality(
+        self, response: str, context: str = ""
+    ) -> bool:
+        """Validate quality of generated conversation responses"""
+
+        if not response or len(response.strip()) < 5:
+            return False
+
+        # Check for error messages
+        if response.lower().startswith("error") or "error" in response.lower():
+            return False
+
+        # Check for reasonable length (not too short or too long)
+        if len(response) < 10 or len(response) > 1000:
+            return False
+
+        # Check for natural conversation markers
+        unnatural_patterns = [
+            "as an ai",
+            "i'm an ai",
+            "i cannot",
+            "i don't have the ability",
+            "i'm not able to",
+            "i cannot provide",
+            "i'm sorry, but i cannot",
+        ]
+
+        response_lower = response.lower()
+        for pattern in unnatural_patterns:
+            if pattern in response_lower:
+                return False
+
+        return True
+
+    def get_optimal_provider_for_conversation(
+        self, character_category: str = "universal"
+    ) -> str:
+        """Get optimal provider for character conversations based on character type"""
+
+        chat_providers = self.get_chat_providers()
+
+        # Prefer Claude for character conversations (better at creative roleplay)
+        if "claude" in chat_providers:
+            return "claude"
+        elif "gpt" in chat_providers:
+            return "gpt"
+        else:
+            return self.default_chat_provider if chat_providers else None
