@@ -9,7 +9,7 @@ class Conversation:
         character_id: str,
         character_name: str,
         user_name: str,
-        max_history: int = 25,
+        max_history: int = 30,
         scenario_id: Optional[str] = None,
         provider: Optional[str] = None,
     ):
