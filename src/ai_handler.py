@@ -71,7 +71,7 @@ class AIHandler:
             response = self.deepseek_client.chat.completions.create(
                 model="deepseek-reasoner",
                 messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=10,
+                max_tokens=90,
             )
             if not response.choices:
                 raise Exception("No response from DeepSeek API")
@@ -159,9 +159,8 @@ class AIHandler:
                 model="claude-sonnet-4-20250514",
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
-                max_tokens=1500,
-                temperature=0.7,  # Higher temperature for creative character responses
-                # No thinking mode for natural conversations
+                max_tokens=450,
+                temperature=0.7,
             )
             return response.content[0].text
         except Exception as e:
@@ -176,7 +175,7 @@ class AIHandler:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                max_tokens=1500,
+                max_tokens=450,
                 temperature=0.7,
             )
             return response.choices[0].message.content
@@ -237,6 +236,7 @@ class AIHandler:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
+                max_tokens=64000,
                 temperature=0.3,
             )
 
@@ -279,8 +279,8 @@ class AIHandler:
                 model="claude-sonnet-4-20250514",
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
-                max_tokens=20000,  # Increased to be greater than budget_tokens
-                thinking={"type": "enabled", "budget_tokens": 16000},
+                max_tokens=27000,  # Increased to be greater than budget_tokens
+                thinking={"type": "enabled", "budget_tokens": 18000},
             )
 
             # Extract text content from response blocks

@@ -242,7 +242,11 @@ Evaluate thoroughly and provide specific, actionable feedback."""
     def _parse_evaluation_response(
         self, response: str, evaluator: str, metadata: Optional[Dict] = None
     ) -> Optional[EvaluationResult]:
-        """Parse AI response and extract structured evaluation data with enhanced logging"""
+        """
+        Parse AI response and extract structured evaluation data with enhanced error logging
+
+        ENHANCED: Better error logging for DeepSeek responses with full context
+        """
 
         try:
             # Handle different response formats by evaluator
@@ -254,6 +258,28 @@ Evaluate thoroughly and provide specific, actionable feedback."""
                 if json_match:
                     json_content = json_match.group(0)
                 else:
+                    # Log detailed error for Claude
+                    error_context = {
+                        "evaluator": evaluator,
+                        "response_length": len(response),
+                        "response_preview": response[:500],
+                        "metadata": metadata,
+                        "search_pattern": "JSON object",
+                        "full_response": response,
+                    }
+
+                    # Log to results manager if available
+                    if hasattr(self, "results_manager") and hasattr(
+                        self.results_manager, "log_evaluation_error"
+                    ):
+                        self.results_manager.log_evaluation_error(
+                            evaluator,
+                            response,
+                            "No JSON found in Claude response",
+                            "unknown",
+                            error_context,
+                        )
+
                     print(f"No JSON found in {evaluator} response")
                     return None
 
@@ -272,28 +298,110 @@ Evaluate thoroughly and provide specific, actionable feedback."""
                         break
 
                 if not json_content:
+                    # Log detailed error for O3
+                    error_context = {
+                        "evaluator": evaluator,
+                        "response_length": len(response),
+                        "response_preview": response[:500],
+                        "metadata": metadata,
+                        "patterns_tried": len(patterns),
+                        "full_response": response,
+                    }
+
+                    if hasattr(self, "results_manager") and hasattr(
+                        self.results_manager, "log_evaluation_error"
+                    ):
+                        self.results_manager.log_evaluation_error(
+                            evaluator,
+                            response,
+                            "No JSON found in O3 response",
+                            "unknown",
+                            error_context,
+                        )
+
                     print(f"No JSON found in {evaluator} response")
                     return None
 
             elif evaluator == "deepseek_reasoner":
-                # DeepSeek might have truncated JSON - try to repair it
+                # DeepSeek - enhanced error handling and logging
                 json_match = re.search(r"\{.*\}", response, re.DOTALL)
                 if json_match:
                     json_content = json_match.group(0)
-                    # Check if JSON is truncated and try to fix common issues
+
+                    # Check if JSON appears to be truncated
                     if not json_content.endswith("}"):
-                        # Try to complete the JSON if it's cut off
+                        # Log truncation warning
+                        truncation_context = {
+                            "evaluator": evaluator,
+                            "json_length": len(json_content),
+                            "response_length": len(response),
+                            "last_20_chars": json_content[-20:],
+                            "ends_with_brace": json_content.endswith("}"),
+                            "metadata": metadata,
+                            "full_response": response,
+                            "extracted_json": json_content,
+                        }
+
+                        if hasattr(self, "results_manager") and hasattr(
+                            self.results_manager, "log_evaluation_error"
+                        ):
+                            self.results_manager.log_evaluation_error(
+                                evaluator,
+                                response,
+                                "DeepSeek JSON appears truncated",
+                                "unknown",
+                                truncation_context,
+                            )
+
+                        # Try to auto-repair common truncation issues
                         if (
                             '"character_authenticity"' in json_content
                             and not '"character_authenticity":' in json_content
                         ):
-                            # Likely truncated at character_authenticity key
-                            json_content = json_content.replace(
-                                '"characte', '"character_authenticity": 8}'
+                            # Common truncation at character_authenticity key
+                            json_content = (
+                                json_content.rsplit('"character', 1)[0]
+                                + '"character_authenticity": 8}'
+                            )
+                            print(f"⚠️ Auto-repaired truncated DeepSeek JSON")
+                        elif json_content.count("{") > json_content.count("}"):
+                            # Missing closing braces
+                            missing_braces = json_content.count(
+                                "{"
+                            ) - json_content.count("}")
+                            json_content += "}" * missing_braces
+                            print(
+                                f"⚠️ Auto-repaired DeepSeek JSON with {missing_braces} missing braces"
                             )
                         else:
                             json_content += "}"
+                            print(
+                                f"⚠️ Auto-repaired DeepSeek JSON with generic closing brace"
+                            )
                 else:
+                    # No JSON found at all
+                    error_context = {
+                        "evaluator": evaluator,
+                        "response_length": len(response),
+                        "response_preview": response[:500],
+                        "metadata": metadata,
+                        "search_pattern": r"\{.*\}",
+                        "contains_scores": "scores" in response.lower(),
+                        "contains_reasoning": "reasoning" in response.lower(),
+                        "full_response": response,
+                    }
+
+                    if hasattr(self, "results_manager") and hasattr(
+                        self.results_manager, "log_evaluation_error"
+                    ):
+                        self.results_manager.log_evaluation_error(
+                            evaluator,
+                            response,
+                            "No JSON found in DeepSeek response",
+                            "unknown",
+                            error_context,
+                        )
+
                     print(f"No JSON found in {evaluator} response")
                     return None
 
@@ -307,10 +415,64 @@ Evaluate thoroughly and provide specific, actionable feedback."""
                     return None
 
             # Parse the extracted JSON
-            evaluation_data = json.loads(json_content)
+            try:
+                evaluation_data = json.loads(json_content)
+            except json.JSONDecodeError as json_error:
+                # Enhanced JSON parsing error logging
+                parsing_context = {
+                    "evaluator": evaluator,
+                    "json_content_length": len(json_content),
+                    "json_error": str(json_error),
+                    "error_position": getattr(json_error, "pos", "unknown"),
+                    "error_line": getattr(json_error, "lineno", "unknown"),
+                    "error_column": getattr(json_error, "colno", "unknown"),
+                    "json_preview": json_content[:200],
+                    "json_around_error": self._extract_json_context(
+                        json_content, getattr(json_error, "pos", 0)
+                    ),
+                    "metadata": metadata,
+                    "full_response": response,
+                    "extracted_json": json_content,
+                }
+
+                if hasattr(self, "results_manager") and hasattr(
+                    self.results_manager, "log_evaluation_error"
+                ):
+                    self.results_manager.log_evaluation_error(
+                        evaluator,
+                        response,
+                        f"JSON parsing error: {json_error}",
+                        "unknown",
+                        parsing_context,
+                    )
+
+                print(f"JSON parsing error for {evaluator}: {json_error}")
+                print(f"Attempted to parse: {json_content[:200]}...")
+                return None
 
             # Validate required fields
             if "scores" not in evaluation_data or "reasoning" not in evaluation_data:
+                validation_context = {
+                    "evaluator": evaluator,
+                    "missing_scores": "scores" not in evaluation_data,
+                    "missing_reasoning": "reasoning" not in evaluation_data,
+                    "available_keys": list(evaluation_data.keys()),
+                    "metadata": metadata,
+                    "parsed_data": evaluation_data,
+                    "full_response": response,
+                }
+
+                if hasattr(self, "results_manager") and hasattr(
+                    self.results_manager, "log_evaluation_error"
+                ):
+                    self.results_manager.log_evaluation_error(
+                        evaluator,
+                        response,
+                        "Missing required fields in parsed JSON",
+                        "unknown",
+                        validation_context,
+                    )
+
                 print(f"Missing required fields in {evaluator} response")
                 return None
 
@@ -320,6 +482,27 @@ Evaluate thoroughly and provide specific, actionable feedback."""
             # Validate all criteria are present
             missing_criteria = set(self.evaluation_criteria) - set(scores.keys())
             if missing_criteria:
+                criteria_context = {
+                    "evaluator": evaluator,
+                    "missing_criteria": list(missing_criteria),
+                    "expected_criteria": self.evaluation_criteria,
+                    "received_criteria": list(scores.keys()),
+                    "metadata": metadata,
+                    "scores_data": scores,
+                    "full_response": response,
+                }
+
+                if hasattr(self, "results_manager") and hasattr(
+                    self.results_manager, "log_evaluation_error"
+                ):
+                    self.results_manager.log_evaluation_error(
+                        evaluator,
+                        response,
+                        f"Missing criteria: {missing_criteria}",
+                        "unknown",
+                        criteria_context,
+                    )
+
                 print(f"Missing criteria in {evaluator} response: {missing_criteria}")
                 return None
 
@@ -368,13 +551,50 @@ Evaluate thoroughly and provide specific, actionable feedback."""
                 model_metadata=model_metadata,
             )
 
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error for {evaluator}: {e}")
-            print(f"Attempted to parse: {json_content[:200]}...")
-            return None
         except Exception as e:
+            # Catch-all error logging
+            general_error_context = {
+                "evaluator": evaluator,
+                "exception_type": type(e).__name__,
+                "exception_message": str(e),
+                "response_length": len(response),
+                "metadata": metadata,
+                "full_response": response,
+            }
+
+            if hasattr(self, "results_manager") and hasattr(
+                self.results_manager, "log_evaluation_error"
+            ):
+                self.results_manager.log_evaluation_error(
+                    evaluator,
+                    response,
+                    f"General parsing error: {e}",
+                    "unknown",
+                    general_error_context,
+                )
+
             print(f"Error parsing {evaluator} response: {e}")
             return None
+
+    def _extract_json_context(
+        self, json_content: str, error_pos: int, context_chars: int = 100
+    ) -> str:
+        """Extract context around JSON parsing error position"""
+        try:
+            start = max(0, error_pos - context_chars)
+            end = min(len(json_content), error_pos + context_chars)
+            context = json_content[start:end]
+
+            # Mark the error position
+            if error_pos >= start and error_pos <= end:
+                relative_pos = error_pos - start
+                context = (
+                    context[:relative_pos] + "<<<ERROR_HERE>>>" + context[relative_pos:]
+                )
+
+            return context
+        except:
+            return "Could not extract error context"
 
     def _calculate_response_confidence(self, evaluation_data: Dict) -> float:
         """Calculate confidence score based on response completeness and quality"""
