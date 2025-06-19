@@ -1,13 +1,10 @@
 """
-Conversation Generator - Automated conversation creation for character evaluation
+Conversation Generator - Fixed with Character Greeting + Enhanced User Bot Context
 
-This module replaces hardcoded conversations with AI-generated conversations
-that follow scenario objectives and maintain natural flow.
-
-Fixed AI assignments:
-- User responses: GPT-4.1 (always)
-- Character responses: Specified chatbot AI (Claude/GPT-4.1/etc.)
-- Evaluation: DeepSeek Reasoner (always)
+FIXED:
+1. Conversations now start with character's signature greeting
+2. User bot gets full character context for realistic responses
+3. User responds to greeting + introduces scenario naturally
 """
 
 import random
@@ -24,7 +21,7 @@ from test_scenarios import TestScenarios
 
 
 class ConversationGenerator:
-    """Generates realistic conversations between user and character for evaluation"""
+    """Generates realistic conversations with proper character greeting and context"""
 
     def __init__(
         self, ai_handler, character_manager: CharacterManager, scenarios: TestScenarios
@@ -37,10 +34,10 @@ class ConversationGenerator:
         self,
         character_data: Dict,
         scenario_data: Dict,
-        chatbot_provider: str = "claude",
+        chatbot_provider: str = "gpt",
         user_name: str = "TestUser",
     ) -> Conversation:
-        """Generate complete conversation following scenario objectives"""
+        """Generate complete conversation starting with character greeting"""
 
         character_id = character_data["id"]
         character_name = character_data["name"]
@@ -55,36 +52,42 @@ class ConversationGenerator:
             provider=chatbot_provider,
         )
 
-        # Start with scenario's initial user message
-        initial_message = scenario_data["initial_user_message"]
-        conversation.add_message("user", initial_message)
+        # FIXED: Start with character's signature greeting
+        character_greeting = self.character_manager.get_character_greeting(
+            character_id, user_name
+        )
+        conversation.add_message("assistant", character_greeting)
 
-        # Generate character's greeting/first response
+        # FIXED: Generate user response to greeting + scenario introduction
+        user_response = self._generate_greeting_response_with_scenario(
+            character_data, scenario_data, character_greeting, user_name
+        )
+        conversation.add_message("user", user_response)
+
+        # Generate character's response to user's scenario introduction
         system_prompt = self.character_manager.generate_system_prompt(
-            character_id, user_name, "other", ""  # No history for first response
+            character_id, user_name, "other", conversation.get_formatted_history()
         )
 
         character_response = self.ai_handler.get_response_sync(
-            system_prompt, initial_message, chatbot_provider
+            system_prompt, user_response, chatbot_provider
         )
         conversation.add_message("assistant", character_response)
 
         # Generate remaining conversation exchanges
         target_exchanges = scenario_data.get("target_exchanges", 10)
-        conversation_flow = scenario_data.get("conversation_flow", [])
-        follow_up_prompts = scenario_data.get("follow_up_prompts", [])
 
-        # Generate exchanges (each exchange = user message + character response)
-        exchanges_completed = 1  # Already did initial exchange
-        max_exchanges = target_exchanges // 2  # Convert to exchange pairs
+        # We've already done 2 exchanges (greeting + scenario intro), continue from there
+        exchanges_completed = 2
+        max_exchanges = target_exchanges // 2
 
-        for exchange_num in range(2, max_exchanges + 1):
+        for exchange_num in range(3, max_exchanges + 1):
             if exchanges_completed >= max_exchanges:
                 break
 
-            # Generate user response using GPT-4.1
+            # Generate user response with full character context
             user_response = self._generate_user_response(
-                conversation, scenario_data, exchange_num
+                conversation, character_data, scenario_data, exchange_num
             )
 
             if not user_response:
@@ -92,7 +95,7 @@ class ConversationGenerator:
 
             conversation.add_message("user", user_response)
 
-            # Generate character response using specified provider
+            # Generate character response
             updated_system_prompt = self.character_manager.generate_system_prompt(
                 character_id, user_name, "other", conversation.get_formatted_history()
             )
@@ -113,14 +116,86 @@ class ConversationGenerator:
         conversation.mark_complete("completed")
 
         print(
-            f"✓ Generated conversation: {exchanges_completed} exchanges, {conversation.get_message_count()} messages"
+            f"✓ Generated conversation: {exchanges_completed} exchanges, {conversation.get_message_count()} messages (started with character greeting)"
         )
         return conversation
 
+    def _generate_greeting_response_with_scenario(
+        self,
+        character_data: Dict,
+        scenario_data: Dict,
+        character_greeting: str,
+        user_name: str,
+    ) -> str:
+        """Generate user response that acknowledges greeting and introduces scenario"""
+
+        character_name = character_data.get("name", "Character")
+        character_description = character_data.get("description", "")
+        scenario_initial_message = scenario_data["initial_user_message"]
+        scenario_name = scenario_data.get("name", "")
+        scenario_description = scenario_data.get("description", "")
+
+        # Enhanced user prompt with character awareness
+        user_prompt = f"""You just met {character_name} who greeted you with: "{character_greeting}"
+
+CHARACTER CONTEXT:
+- Name: {character_name}
+- Description: {character_description}
+- Background: {character_data.get('greeting_context', '')}
+- Personality: {character_data.get('personality', '')}
+
+SCENARIO CONTEXT:
+- Scenario: {scenario_name}
+- Your situation: {scenario_description}
+- What you need to communicate: {scenario_initial_message}
+
+Generate a natural user response that:
+1. Acknowledges their greeting appropriately 
+2. Responds to their personality/style naturally
+3. Introduces the scenario situation smoothly
+4. Feels like a real person who just met this character
+5. Is 2-4 sentences long
+
+Examples:
+- If they're energetic: Match some energy before bringing up your issue
+- If they're formal: Be polite and respectful 
+- If they're mystical: Show curiosity about their world
+
+Respond only with the user message, no quotes or formatting."""
+
+        try:
+            # Use GPT-4.1 for user responses with enhanced context
+            user_response = self.ai_handler.get_response_sync(
+                "You are helping generate realistic user responses that show awareness of who they're talking to. Be natural, contextual, and engaging.",
+                user_prompt,
+                "gpt",
+            )
+
+            # Clean up response
+            user_response = user_response.strip()
+            if user_response.startswith('"') and user_response.endswith('"'):
+                user_response = user_response[1:-1]
+
+            return user_response if user_response else scenario_initial_message
+
+        except Exception as e:
+            print(f"Error generating greeting response: {e}")
+            # Fallback to scenario message
+            return scenario_initial_message
+
     def _generate_user_response(
-        self, conversation: Conversation, scenario_data: Dict, exchange_num: int
+        self,
+        conversation: Conversation,
+        character_data: Dict,
+        scenario_data: Dict,
+        exchange_num: int,
     ) -> Optional[str]:
-        """Generate contextual user response using GPT-4.1"""
+        """Generate contextual user response with full character awareness"""
+
+        character_name = character_data.get("name", "Character")
+        character_description = character_data.get("description", "")
+        character_personality = character_data.get("personality", "")
+        character_background = character_data.get("greeting_context", "")
 
         scenario_name = scenario_data.get("name", "Unknown")
         scenario_description = scenario_data.get("description", "")
@@ -128,13 +203,13 @@ class ConversationGenerator:
         follow_up_prompts = scenario_data.get("follow_up_prompts", [])
 
         # Get conversation history
-        recent_messages = conversation.get_last_messages(4)  # Last 2 exchanges
+        recent_messages = conversation.get_last_messages(4)
         history_text = ""
         for role, content in recent_messages:
             if role == "user":
-                history_text += f"User: {content}\n"
+                history_text += f"You: {content}\n"
             else:
-                history_text += f"Character: {content}\n"
+                history_text += f"{character_name}: {content}\n"
 
         # Build guidance for user response
         flow_guidance = ""
@@ -143,33 +218,45 @@ class ConversationGenerator:
         elif follow_up_prompts:
             flow_guidance = random.choice(follow_up_prompts)
 
-        # Create user response prompt
-        user_prompt = f"""You are a user having a conversation with an AI character in the "{scenario_name}" scenario.
+        # Enhanced user response prompt with character context
+        user_prompt = f"""You are having a conversation with {character_name} in the "{scenario_name}" scenario.
 
-Scenario Description: {scenario_description}
+CHARACTER YOU'RE TALKING TO:
+- Name: {character_name}
+- Description: {character_description}
+- Personality: {character_personality}
+- Background: {character_background}
 
-Recent conversation:
+SCENARIO CONTEXT:
+- Scenario: {scenario_name}
+- Description: {scenario_description}
+
+RECENT CONVERSATION:
 {history_text}
 
-Your role: Continue this conversation naturally as a user who {scenario_description.lower()}. 
-
-Guidance for this response: {flow_guidance}
+GUIDANCE FOR THIS RESPONSE: {flow_guidance}
 
 Generate a natural user response that:
-1. Follows the conversation flow naturally
-2. Shows genuine engagement with the character
-3. Advances the scenario objectives
+1. Shows awareness of who you're talking to ({character_name})
+2. Responds appropriately to their personality and style
+3. Advances the scenario naturally
 4. Feels like a real person's response (not robotic)
 5. Is 1-3 sentences long
+6. References their profession/world naturally when relevant
+
+Examples:
+- If talking to a racing driver: Can reference speed, racing, cars naturally
+- If talking to a teacher: Can show respect for their expertise with children
+- If talking to a mystical character: Can show curiosity about their magical world
 
 Respond only with the user message, no quotes or formatting."""
 
         try:
-            # Always use GPT-4.1 for user responses
+            # Always use GPT-4.1 for user responses with enhanced character context
             user_response = self.ai_handler.get_response_sync(
-                "You are helping generate realistic user responses for character evaluation conversations. Be natural and engaging.",
+                "You are helping generate realistic user responses that show natural awareness of the character's identity, profession, and personality. Be contextual and authentic.",
                 user_prompt,
-                "gpt",  # GPT-4.1 provider
+                "gpt",
             )
 
             # Clean up response
@@ -228,7 +315,7 @@ Respond only with the user message, no quotes or formatting."""
 
 # Testing function for validation
 def test_conversation_generator():
-    """Test conversation generation with existing system"""
+    """Test conversation generation with new greeting-first approach"""
     # Import here to avoid circular imports
     import sys
     import os
@@ -237,7 +324,7 @@ def test_conversation_generator():
 
     from ai_handler import AIHandler
 
-    print("Testing Conversation Generator...")
+    print("Testing Enhanced Conversation Generator...")
 
     # Initialize components
     ai_handler = AIHandler()
@@ -256,10 +343,20 @@ def test_conversation_generator():
             f"✓ Generated test conversation with {test_conversation.get_message_count()} messages"
         )
 
-        # Show first few messages
-        recent_messages = test_conversation.get_last_messages(4)
-        for role, content in recent_messages:
-            print(f"{role}: {content[:100]}...")
+        # Show conversation flow
+        messages = test_conversation.get_last_messages(6)
+        print("\n📝 Conversation Preview:")
+        for i, (role, content) in enumerate(messages):
+            speaker = "Character" if role == "assistant" else "User"
+            preview = content[:100] + "..." if len(content) > 100 else content
+            print(f"{i+1}. {speaker}: {preview}")
+
+        # Verify it starts with character greeting
+        first_message = messages[0] if messages else None
+        if first_message and first_message[0] == "assistant":
+            print("\n✅ Conversation correctly starts with character greeting")
+        else:
+            print("\n❌ Conversation does not start with character greeting")
     else:
         print("✗ Test conversation generation failed")
 

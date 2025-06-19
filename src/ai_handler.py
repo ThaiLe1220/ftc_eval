@@ -159,7 +159,7 @@ class AIHandler:
                 model="claude-sonnet-4-20250514",
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
-                max_tokens=450,
+                max_tokens=360,
                 temperature=0.7,
             )
             return response.content[0].text
@@ -175,7 +175,7 @@ class AIHandler:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                max_tokens=450,
+                max_tokens=360,
                 temperature=0.7,
             )
             return response.choices[0].message.content
@@ -475,7 +475,7 @@ class AIHandler:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=450,
+                max_tokens=180,
                 temperature=0.9,
             )
             return response.choices[0].message.content

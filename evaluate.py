@@ -9,6 +9,8 @@ Usage:
     python evaluate.py --bots_ai claude                    # Default 4 characters
     python evaluate.py --char marco --bots_ai gpt          # Single character
     python evaluate.py --char marco,lysandra --scenarios seeking_guidance,emotional_support
+    python evaluate.py --bots_ai gpt --char marco --scenarios emotional_support
+
 """
 
 import sys

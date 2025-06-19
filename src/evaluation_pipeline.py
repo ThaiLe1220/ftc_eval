@@ -240,7 +240,12 @@ class EvaluationPipeline:
             )
 
             # Generate conversation ID for session
-            conversation_id = f"{session_id}_{character_id}_{scenario_id}_{bots_ai}"
+            if session_id:
+                conversation_id = f"{session_id}_{character_id}_{scenario_id}_{bots_ai}"
+            else:
+                conversation_id = self.results_manager.generate_conversation_id(
+                    character_id, scenario_id, bots_ai
+                )
             conversation.set_conversation_id(conversation_id)
 
             # Validate conversation

@@ -9,7 +9,7 @@ class Conversation:
         character_id: str,
         character_name: str,
         user_name: str,
-        max_history: int = 10,
+        max_history: int = 25,
         scenario_id: Optional[str] = None,
         provider: Optional[str] = None,
     ):
@@ -19,9 +19,7 @@ class Conversation:
         self.max_history = max_history
         self.scenario_id = scenario_id
         self.provider = provider
-        self.messages: List[Tuple[str, str, datetime]] = (
-            []
-        )  # (role, content, timestamp)
+        self.messages: List[Tuple[str, str, datetime]] = []
 
         # Evaluation metadata
         self.conversation_id: Optional[str] = None
